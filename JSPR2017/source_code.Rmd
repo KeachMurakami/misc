@@ -1,0 +1,171 @@
+---
+title: "A tool for quantification of excitation energy distribution between photosystem I and II"
+output:
+  md_document:
+    variant: markdown_github
+---
+
+```{r setup, echo = F, message = F, warning = F}
+rm(list = ls())
+library(knitr)
+library(magrittr)
+library(tidyverse)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+  
+## Overview
+
+[R](https://www.r-project.org/) code for quantification of excitation energy distribution between photosystems.
+For details on the method, please refer to the forthcoming paper ([Murakami et al., in press, *Plant, Cell & Environment*](https://doi.org/10.1111/pce.12986)).
+
+PSII・PSI間での励起エネルギー分配を定量するためのスクリプトです。
+[R](https://www.r-project.org/)言語で記述されています。
+詳細は、([Murakami et al., in press, *Plant, Cell & Environment*](https://doi.org/10.1111/pce.12986)) を参照してください.
+
+
+## Dataset format
+
+Reshape your data frame object as follows.
+
+データフレームの形式を以下のように整形してください。
+
+```{r Usage}
+# input absorptance for light1 and light2
+input_df <-
+  dplyr::select(read.csv("~/Dropbox/Symp/JSPR2017/data_sup5_rep1.csv"), -X) %>%
+  dplyr::filter(abs_light1 + abs_light2 != 0,
+                abs_light1 != 0)
+  
+
+kable(input_df, format = "markdown")
+```
+
+- abs_light1: absorbed photons of light1 [µmol m^-2^ s^-1^].
+- abs_light2: absorbed photons of light2 [µmol m^-2^ s^-1^].
+- yield_ps1: photochemical yield of PSI (= Y~I~).
+- yield_ps2: photochemical yield of PSII (= Y~II~).
+
+
+## Demo
+
+```{r code}
+devtools::source_url("https://gist.githubusercontent.com/KeachMurakami/eaa38a1ff0dd5d0369a6c0ca53e68326/raw/5440e25cc2c66d3a3d49d98a1dc4687c00b16c5b/excitation_energy_distribution")
+
+
+curve_fit <- 
+  function(input_df,
+          # set the fraction of ETR1 directed to CEF-PSI (from 0 to 1)
+           cef_ps1 = 0,
+          # set the fractions of absorbed photons distributed to non-photosynthetic components (from 0 to 1)
+           f_light1_npc = 0, f_light2_npc = 0,
+          # set initial values of f for non-linear fitting; adjust when the calculation does not converge (from 0 to 1)
+           f_light1_initial = 0.50, f_light2_initial = 0.20){ 
+    
+  input_df <-
+    dplyr::mutate(.data = input_df,
+                  yield_ratio = yield_ps2 / yield_ps1)
+
+# perform curve-fitting (according to Eqn. S4)
+  fit_yield_ratio <-
+    nls(data = input_df,
+        formula =
+          yield_ratio ~ 
+            {abs_light1 * (1-f_light1-f_light1_npc) + abs_light2 * (1-f_light2-f_light2_npc)} / 
+            {(1 + cef_ps1) * (abs_light1 * f_light1 + abs_light2 * f_light2)},
+        start = list(f_light1 = f_light1_initial, f_light2 = f_light2_initial))
+
+  f_light1 <-
+    summary(fit_yield_ratio)$coefficients[1,1]
+  f_light2 <-
+    summary(fit_yield_ratio)$coefficients[2,1]
+  
+# plot yield ratios
+  plot_yield_ratio <-
+    ggplot(data = input_df, aes(x = abs_light2, y = yield_ratio, shape = factor(abs_light1), group = abs_light1)) +
+    geom_point() +
+    lapply(unique(input_df$abs_light1), function(abs_light1) {
+      stat_function(fun = function(x) {
+        {abs_light1 * (1-f_light1-f_light1_npc) + x * (1-f_light2-f_light2_npc)} / 
+        {(1 + cef_ps1) * (abs_light1 * f_light1 + x * f_light2)}
+      })
+    }) +
+    labs(x = expression(absorbed~PFD~of~light2~"["*mu*mol ~ m^-2 ~ s^-1 * "]"),
+         y = expression(Y[II] * "/" * Y[I] )) +
+    guides(shape = guide_legend(expression(absorbed~PFD~of~light1~"["*mu*mol ~ m^-2 ~ s^-1 * "]"))) +
+    theme(legend.position = c(0, 1),
+          legend.justification = c(0, 1))
+  
+  return(list(curve_fitting = plot_yield_ratio, Parameters = tidy(fit_yield_ratio)))
+  }
+```
+
+Apply `curve_fit` function to your data frame objects to show curve-fitting and estimated parameters.
+
+`curve_fit`関数をデータフレームに適用すると、カーブフィッティングと分配パラメータが表示されます。
+
+```{r demo1, echo = T}
+curve_fit(input_df)
+```
+
+Assuming 25% cyclic electron flow around PSI.
+
+CEF-PSIの寄与を考慮する場合、以下のようにします。
+
+```{r demo2, echo = T}
+curve_fit(input_df, cef_ps1 = 0.25)
+```
+
+Assuming 10% absorption by non-photosynthetic pigments.
+
+光合成色素以外への成分への光吸収を考慮する場合、以下のようにします。
+
+```{r demo3, echo = T}
+curve_fit(input_df, f_light1_npc = 0.10, f_light2_npc = 0.10)
+```
+
+Assuming both cyclic flow and non-photosynthetic pigments.
+
+CEF-PSIおよび光合成色素以外への成分への光吸収のいずれをも考慮する場合、以下のようにします。
+
+```{r demo4, echo = T}
+curve_fit(input_df, cef_ps1 = 0.25, f_light1_npc = 0.10, f_light2_npc = 0.10)
+```
+
+
+## Installation
+
+```
+# if not installed,
+# install.packages("devtools")
+# install.packages("magrittr")
+# install.packages("tidyverse")
+# install.packages("broom")
+
+
+# type to load from gist
+
+devtools::source_url("https://gist.githubusercontent.com/KeachMurakami/eaa38a1ff0dd5d0369a6c0ca53e68326/raw/5440e25cc2c66d3a3d49d98a1dc4687c00b16c5b/excitation_energy_distribution")
+
+# or copy&paste lines.
+
+library(magrittr)
+library(tidyverse)
+library(broom)
+```
+
+
+## Citation
+
+Murakami K., Matsuda R., Fujiwara K. (in press), “Quantification of excitation energy distribution between photosystems based on a mechanistic model of photosynthetic electron transport”, *Plant, Cell & Environment*. Vol. XXX, pp. XXX--YYY, doi: 10.1111/pce.12986.
+
+
+## Contact
+
+[Keach Murakami](https://keachmurakami.github.io/about/)
+
+
+## Session information
+
+```{r}
+devtools::session_info()
+```
