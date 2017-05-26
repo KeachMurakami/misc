@@ -5,6 +5,72 @@ Overview
 
 PSII・PSI間での励起エネルギー分配を定量するためのスクリプトです。 [R](https://www.r-project.org/)言語で記述されています。 詳細は、([Murakami et al., in press, *Plant, Cell & Environment*](https://doi.org/10.1111/pce.12986)) を参照してください.
 
+Installation
+------------
+
+    # if not installed,
+    # install.packages("devtools")
+    # install.packages("magrittr")
+    # install.packages("tidyverse")
+    # install.packages("broom")
+
+
+    # type to load from gist
+
+    devtools::source_url("https://gist.githubusercontent.com/KeachMurakami/eaa38a1ff0dd5d0369a6c0ca53e68326/raw/e249772e98a0977a07d93371d13579b52bab055f/excitation_energy_distribution")
+
+    # or copy&paste lines.
+
+    library(magrittr)
+    library(tidyverse)
+    library(broom)
+
+    curve_fit <- 
+      function(input_df,
+              # set the fraction of ETR1 directed to CEF-PSI (from 0 to 1)
+               cef_ps1 = 0,
+              # set the fractions of absorbed photons distributed to non-photosynthetic components (from 0 to 1)
+               f_light1_npc = 0, f_light2_npc = 0,
+              # set initial values of f for non-linear fitting; adjust when the calculation does not converge (from 0 to 1)
+               f_light1_initial = 0.50, f_light2_initial = 0.20){ 
+        
+      input_df <-
+        dplyr::mutate(.data = input_df,
+                      yield_ratio = yield_ps2 / yield_ps1)
+
+    # perform curve-fitting (according to Eqn. S4)
+      fit_yield_ratio <-
+        nls(data = input_df,
+            formula =
+              yield_ratio ~ 
+                {abs_light1 * (1-f_light1-f_light1_npc) + abs_light2 * (1-f_light2-f_light2_npc)} / 
+                {(1 + cef_ps1) * (abs_light1 * f_light1 + abs_light2 * f_light2)},
+            start = list(f_light1 = f_light1_initial, f_light2 = f_light2_initial))
+
+      f_light1 <-
+        summary(fit_yield_ratio)$coefficients[1,1]
+      f_light2 <-
+        summary(fit_yield_ratio)$coefficients[2,1]
+      
+    # plot yield ratios
+      plot_yield_ratio <-
+        ggplot(data = input_df, aes(x = abs_light2, y = yield_ratio, shape = factor(abs_light1), group = abs_light1)) +
+        geom_point() +
+        lapply(unique(input_df$abs_light1), function(abs_light1) {
+          stat_function(fun = function(x) {
+            {abs_light1 * (1-f_light1-f_light1_npc) + x * (1-f_light2-f_light2_npc)} / 
+            {(1 + cef_ps1) * (abs_light1 * f_light1 + x * f_light2)}
+          })
+        }) +
+        labs(x = expression(absorbed~PFD~of~light2~"["*mu*mol ~ m^-2 ~ s^-1 * "]"),
+             y = expression(Y[II] * "/" * Y[I] )) +
+        guides(shape = guide_legend(expression(absorbed~PFD~of~light1~"["*mu*mol ~ m^-2 ~ s^-1 * "]"))) +
+        theme(legend.position = c(0, 1),
+              legend.justification = c(0, 1))
+      
+      return(list(curve_fitting = plot_yield_ratio, Parameters = tidy(fit_yield_ratio)))
+      }
+
 Dataset format
 --------------
 
@@ -102,26 +168,6 @@ curve_fit(input_df, cef_ps1 = 0.25, f_light1_npc = 0.10, f_light2_npc = 0.10)
     ##       term  estimate   std.error statistic      p.value
     ## 1 f_light1 0.4318085 0.002326040 185.64105 1.648395e-12
     ## 2 f_light2 0.1051303 0.004765855  22.05906 5.672949e-07
-
-Installation
-------------
-
-    # if not installed,
-    # install.packages("devtools")
-    # install.packages("magrittr")
-    # install.packages("tidyverse")
-    # install.packages("broom")
-
-
-    # type to load from gist
-
-    devtools::source_url("https://gist.githubusercontent.com/KeachMurakami/eaa38a1ff0dd5d0369a6c0ca53e68326/raw/5440e25cc2c66d3a3d49d98a1dc4687c00b16c5b/excitation_energy_distribution")
-
-    # or copy&paste lines.
-
-    library(magrittr)
-    library(tidyverse)
-    library(broom)
 
 Citation
 --------
